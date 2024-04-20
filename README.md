@@ -1,8 +1,8 @@
 ## TODO
 
-[ ] Leitura do Arquivo CSV: Implemente uma função para ler os dados do arquivo compras.csv. Use a biblioteca <fstream> para abrir e ler o arquivo linha por linha.
+[X] Leitura do Arquivo CSV: Implemente uma função para ler os dados do arquivo compras.csv. Use a biblioteca <fstream> para abrir e ler o arquivo linha por linha.
 
-[ ] Estrutura de Dados: Crie uma estrutura ou classe para representar uma compra, contendo atributos como Pedido, valor e ano.
+[X] Estrutura de Dados: Crie uma estrutura ou classe para representar uma compra, contendo atributos como Pedido, valor e ano.
 
 [ ] Implementação do Índice Hash Extensível
 
