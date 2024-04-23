@@ -25,3 +25,4 @@
 - [ ] Desalocar memória de `bucket->registros` após acessá-la
 - [ ] Desalocar `compras` após acessá-las (todo incremento, acessar o arquivos "compras.csv", ler as compras e depois desalocar as memórias)
 - [ ] Fazer passo a passo na mão para verificar solução (cada ano está no bucket que deveria estar?)
+- [ ] Adicionar todas as compras de determinado ano na operação "INC"
