@@ -5,8 +5,11 @@
 #include <vector>
 #include <math.h>
 #include <memory>
+#include <algorithm>
 
 using namespace std;
+
+int MAXIMO_REGISTROS = 3;
 
 class Compra {
 public:
@@ -70,15 +73,18 @@ public:
     int maximoRegistros;
 
     Bucket(string filename, int profundidadeLocal, int maximoRegistros=3) : filename(filename), profundidadeLocal(profundidadeLocal), maximoRegistros(maximoRegistros) { 
-        ofstream file(filename);
+        // Gerar arquivo do bucket
+        ofstream file(filename); 
         file.close();
     }
 
     Bucket(string filename, vector<Compra> registros, int profundidadeLocal, int maximoRegistros=3) : filename(filename), profundidadeLocal(profundidadeLocal), maximoRegistros(maximoRegistros) {
         if (registros.size() > this->maximoRegistros) {
             cout << "Máximo de registros é " << this->maximoRegistros << endl;
+            cout << "Nenhum registro foi adicionado" << endl;
+        } else {
+            this->registros = registros;
         }
-        this->registros = registros;
     }
 
     bool cheio() const {
@@ -112,25 +118,26 @@ public:
     }
 
     void imprimir() {
-        for (Compra entry : this->registros) {
-            cout << entry.pedido << endl;
+        for (Compra compra : this->registros) {
+            compra.exibir();
         }
     }
 };
 
 class Diretorio {
 private:
-    int profundidadeGlobal;
     vector<shared_ptr<Bucket>> buckets;
 
 public:
+    int profundidadeGlobal;
+
     Diretorio(int profundidade) : profundidadeGlobal(profundidade) {
         int tamanhoInicial = pow(2, profundidadeGlobal);
         this->buckets.resize(tamanhoInicial);
 
         for (int i = 0; i < tamanhoInicial; ++i) {
             string nomeArquivo = "bucket_" + to_string(i) + ".csv";
-            this->buckets[i] = make_shared<Bucket>(nomeArquivo, 3, profundidadeGlobal);
+            this->buckets[i] = make_shared<Bucket>(nomeArquivo, profundidade, MAXIMO_REGISTROS);
         }
     }
 
@@ -138,19 +145,22 @@ public:
         return ano & ((1 << profundidade) - 1);
     }
 
-    void inserirRegistro(const Compra& compra) {
+    pair<int,bool> inserirRegistro(const Compra& compra) {
         int indice = funcaoHash(compra.ano, this->profundidadeGlobal);
         shared_ptr<Bucket> bucket = this->buckets[indice];
+        bool duplicouDiretorio = false;
 
         bucket->carregar();
         if (!bucket->adicionarRegistro(compra)) {
             if (bucket->profundidadeLocal == profundidadeGlobal) {
                 duplicarDiretorio();
+                duplicouDiretorio = true;
             }
             dividirBucket(indice);
             inserirRegistro(compra); // Tenta inserir compra novamente
         }
         bucket->salvar();
+        return make_pair(bucket->profundidadeLocal, duplicouDiretorio);
     }
 
     void duplicarDiretorio() {
@@ -189,6 +199,42 @@ public:
         novoBucket->salvar();
     }
 
+    pair<int, int> removerRegistros(int ano) {
+        int indice = funcaoHash(ano, profundidadeGlobal);
+        shared_ptr<Bucket> bucket = buckets[indice];
+
+        bucket->carregar();
+        int contagemInicial = bucket->registros.size();
+
+        bucket->registros.erase(
+            remove_if(bucket->registros.begin(), bucket->registros.end(), [ano](const Compra& compra) {
+                return compra.ano == ano;
+            }),
+            bucket->registros.end()
+        );
+
+        int contagemFinal = bucket->registros.size();
+        int tuplasRemovidas = contagemInicial - contagemFinal;
+
+        bucket->salvar();
+
+        return {tuplasRemovidas, bucket->profundidadeLocal};
+    }
+
+    int buscarPorAno(int ano) {
+        int indice = funcaoHash(ano, profundidadeGlobal);
+        shared_ptr<Bucket> bucket = buckets[indice];
+
+        bucket->carregar(); 
+        
+        int quantidadeEncontrada = count_if(bucket->registros.begin(),  bucket->registros.end(), 
+                                            [ano](const Compra& compra) {
+                                                return compra.ano == ano;
+                                            });
+
+        return quantidadeEncontrada;
+    }
+
     void imprimir() {
         cout << "Profundidade Global: " << profundidadeGlobal << endl;
         for (auto& bucket : this->buckets) {
@@ -197,17 +243,65 @@ public:
     }
 };
 
-
 int main() {
-    string nomeArquivo = "compras.csv";
-    LeitorCSV leitor(nomeArquivo);
-    vector<Compra> compras = leitor.lerCompras();
+    string nomeArquivoCompras = "compras.csv";
+    LeitorCSV leitorCompras(nomeArquivoCompras);
+    vector<Compra> compras = leitorCompras.lerCompras();
 
-    Diretorio diretorio(2);
-
-    for (const auto& compra : compras) {
-        diretorio.inserirRegistro(compra);
+    ifstream arquivoInstrucoes("in.txt");
+    ofstream arquivoSaida("out.txt");
+    if (!arquivoInstrucoes.is_open() || !arquivoSaida.is_open()) {
+        cerr << "Erro ao abrir um dos arquivos!" << endl;
+        return 1;
     }
+
+    string linha;
+    getline(arquivoInstrucoes, linha);
+    // Primeira linha: PG/<profundidade_inicial>
+    int profundidadeInicial = std::stoi(linha.substr(3));
+    arquivoSaida << linha << endl;
+
+    Diretorio diretorio(profundidadeInicial);  
+
+    while (getline(arquivoInstrucoes, linha)) {
+        string linha;
+        stringstream ss(linha);
+        int ano;
+        string operacao = linha.substr(0, 3);
+
+        if (operacao == "INC") {
+            ano = stoi(linha.substr(4));
+            for (const auto& compra : compras) {
+                if (compra.ano == ano) {
+                    pair<int, int> resultadoInsercao = diretorio.inserirRegistro(compra);
+                    
+                    arquivoSaida << "INC:" << ano << "/" << diretorio.profundidadeGlobal << "," << resultadoInsercao.first << endl;
+
+                    if (resultadoInsercao.second) {
+                        arquivoSaida << "DUP_DIR:/" << diretorio.profundidadeGlobal << "," << resultadoInsercao.first << endl;
+                    }
+
+                    break;
+                }
+            }
+        } else if (operacao == "REM") {
+            ano = stoi(linha.substr(4));
+
+            // <quantidade de tuplas removidas, profundidade local>
+            pair<int, int> resultadoRemocao = diretorio.removerRegistros(ano);
+
+            arquivoSaida << "REM:" << ano << "/" << resultadoRemocao.first << "," << diretorio.profundidadeGlobal << "," << resultadoRemocao.second << endl;
+        } else if (operacao == "BUS") {
+            ano = stoi(linha.substr(5));
+            int quantidadeDeTuplas = diretorio.buscarPorAno(ano);
+            arquivoSaida << "BUS:" << ano << "/" << quantidadeDeTuplas << endl;
+        }
+    }
+
+    arquivoSaida << "P:/" << diretorio.profundidadeGlobal << endl;
+
+    arquivoInstrucoes.close();
+    arquivoSaida.close();
 
     return 0;
 }

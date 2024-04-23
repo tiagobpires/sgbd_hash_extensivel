@@ -1,4 +1,5 @@
 /.vscode
+/bucket_*
 # Prerequisites
 *.d
 
