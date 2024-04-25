@@ -108,6 +108,10 @@ public:
         file.close();
     }
 
+    void desalocarMemoriaRegistros() {
+        this->registros = vector<Compra>();
+    }
+
     bool adicionarRegistro(Compra compra) {
         if (!cheio()) {
             registros.push_back(compra);
@@ -145,22 +149,22 @@ public:
         return ano & ((1 << profundidade) - 1);
     }
 
-    pair<int,bool> inserirRegistro(const Compra& compra) {
+    int inserirRegistro(const Compra& compra, vector<pair<int,int>> &duplicacoesDiretorio) {
         int indice = funcaoHash(compra.ano, this->profundidadeGlobal);
         shared_ptr<Bucket> bucket = this->buckets[indice];
-        bool duplicouDiretorio = false;
 
         bucket->carregar();
         if (!bucket->adicionarRegistro(compra)) {
             if (bucket->profundidadeLocal == profundidadeGlobal) {
                 duplicarDiretorio();
-                duplicouDiretorio = true;
+                duplicacoesDiretorio.push_back(make_pair(profundidadeGlobal, bucket->profundidadeLocal));
             }
             dividirBucket(indice);
-            inserirRegistro(compra); // Tenta inserir compra novamente
+            return inserirRegistro(compra, duplicacoesDiretorio); // Tenta inserir compra novamente
+        } else {
+            bucket->salvar();
         }
-        bucket->salvar();
-        return make_pair(bucket->profundidadeLocal, duplicouDiretorio);
+        return bucket->profundidadeLocal;
     }
 
     void duplicarDiretorio() {
@@ -174,22 +178,35 @@ public:
         }
     }
 
+    int ajustarIndice(int indice, int PL) {
+        // Converter 'indice' para binário considerando apenas PL dígitos menos significativos
+        int mascara = (1 << PL) - 1; 
+        int bits = indice & mascara; 
+
+        // Adicionar '1' à esquerda dos bits extraídos
+        int novoIndice = (1 << PL) | bits; 
+
+        return novoIndice;
+    }
+
     void dividirBucket(int indice) {
         shared_ptr<Bucket> bucket = this->buckets[indice];
         vector<Compra> registrosAntigos = bucket->registros;
-        bucket->registros.clear();
+        bucket->desalocarMemoriaRegistros();
 
         int profundidadeLocal = bucket->profundidadeLocal;
         int novaProfundidadeLocal = profundidadeLocal + 1;
         bucket->profundidadeLocal++;
 
-        string novaFilename = "bucket_" + to_string(this->buckets.size()) + ".csv";
+        int novoIndice = ajustarIndice(indice, profundidadeLocal);
+
+        string novaFilename = "bucket_" + to_string(novoIndice) + ".csv";
         shared_ptr<Bucket> novoBucket = make_shared<Bucket>(novaFilename, novaProfundidadeLocal);
-        this->buckets.push_back(novoBucket);
+        this->buckets[novoIndice] = novoBucket;
 
         for (const Compra& compra : registrosAntigos) {
-            int novoIndice = funcaoHash(compra.ano, novaProfundidadeLocal);
-            if (novoIndice == indice) {
+            int novoIndiceCompra = funcaoHash(compra.ano, novaProfundidadeLocal);
+            if (novoIndiceCompra == indice) {
                 bucket->adicionarRegistro(compra);
             } else {
                 novoBucket->adicionarRegistro(compra);
@@ -244,9 +261,6 @@ public:
 };
 
 int main() {
-    string nomeArquivoCompras = "compras.csv";
-    LeitorCSV leitorCompras(nomeArquivoCompras);
-    vector<Compra> compras = leitorCompras.lerCompras();
 
     ifstream arquivoInstrucoes("in.txt");
     ofstream arquivoSaida("out.txt");
@@ -264,26 +278,31 @@ int main() {
     Diretorio diretorio(profundidadeInicial);  
 
     while (getline(arquivoInstrucoes, linha)) {
-        string linha;
         stringstream ss(linha);
         int ano;
         string operacao = linha.substr(0, 3);
 
         if (operacao == "INC") {
             ano = stoi(linha.substr(4));
+            
+            string nomeArquivoCompras = "compras.csv";
+            LeitorCSV leitorCompras(nomeArquivoCompras);
+            vector<Compra> compras = leitorCompras.lerCompras();
+            
             for (const auto& compra : compras) {
                 if (compra.ano == ano) {
-                    pair<int, int> resultadoInsercao = diretorio.inserirRegistro(compra);
+                    vector<pair<int, int>> duplicacoesDiretorio;
+                    int profundidadeLocal = diretorio.inserirRegistro(compra, duplicacoesDiretorio);
                     
-                    arquivoSaida << "INC:" << ano << "/" << diretorio.profundidadeGlobal << "," << resultadoInsercao.first << endl;
+                    arquivoSaida << "INC:" << ano << "/" << diretorio.profundidadeGlobal << "," << profundidadeLocal << endl;
 
-                    if (resultadoInsercao.second) {
-                        arquivoSaida << "DUP_DIR:/" << diretorio.profundidadeGlobal << "," << resultadoInsercao.first << endl;
+                    for (auto duplicaoDiretorio : duplicacoesDiretorio) {
+                        arquivoSaida << "DUP_DIR:/" << duplicaoDiretorio.first << "," << duplicaoDiretorio.second << endl;
                     }
-
-                    break;
                 }
             }
+
+            compras = vector<Compra>();
         } else if (operacao == "REM") {
             ano = stoi(linha.substr(4));
 
